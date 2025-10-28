@@ -1,93 +1,161 @@
-# event-attendees-app
+# Event Attendees App
 
+イベント参加者を管理するためのWebアプリケーションです。
 
+## 概要
 
-## Getting started
+このアプリケーションは、イベントの参加者登録、管理、出席確認などを効率的に行うためのASP.NET Core Razor Pagesベースのシステムです。
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## 主な機能
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- 参加者登録
+- 参加者一覧表示
+- 出席状況管理
+- イベント情報管理
+- 参加者検索・フィルタリング
 
-## Add your files
+## 技術スタック
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+- **フロントエンド**: ASP.NET Core Razor Pages, Bootstrap
+- **バックエンド**: ASP.NET Core 8.0
+- **データベース**: SQL Server (Entity Framework Core 8.0.10)
+- **認証**: Azure Key Vault (本番環境)
+- **コンテナ**: Docker (Linux)
+
+## セットアップ
+
+### 前提条件
+
+- .NET 8.0 SDK
+- SQL Server (LocalDB または SQL Server Express)
+- Visual Studio 2022 または Visual Studio Code
+- Docker Desktop (コンテナ実行時)
+
+### インストール手順
+
+1. リポジトリをクローン
+   ```bash
+   git clone https://gitlab.com/union.dml-group/event-attendees-app.git
+   cd event-attendees-app/src/EventAttendeesApp
+   ```
+
+2. 依存関係を復元
+   ```bash
+   dotnet restore
+   ```
+
+3. データベース接続文字列を設定
+   ```bash
+   # appsettings.json または User Secrets で設定
+   dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=(localdb)\\mssqllocaldb;Database=EventAttendeesDB;Trusted_Connection=true;MultipleActiveResultSets=true"
+   ```
+
+4. データベースマイグレーション実行
+   ```bash
+   dotnet ef database update
+   ```
+
+5. アプリケーションを起動
+   ```bash
+   dotnet run
+   ```
+
+## 使用方法
+
+1. ブラウザで `https://localhost:5001` または `http://localhost:5000` にアクセス
+2. ホームページから各機能にアクセス
+3. イベント参加者一覧は `/EventAttendees` で確認可能
+
+## 開発
+
+### 開発環境での起動
+
+```bash
+dotnet watch run
+```
+
+### テスト実行
+
+```bash
+dotnet test
+```
+
+### ビルド
+
+```bash
+dotnet build
+```
+
+### Dockerでの実行
+
+```bash
+docker build -t event-attendees-app .
+docker run -p 8080:8080 event-attendees-app
+```
+
+## ディレクトリ構成
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/union.dml-group/event-attendees-app.git
-git branch -M main
-git push -uf origin main
+event-attendees-app/
+├── src/
+│   └── EventAttendeesApp/
+│       ├── Pages/              # Razor Pages
+│       │   ├── EventAttendees/ # 参加者管理ページ
+│       │   └── Shared/         # 共有レイアウト
+│       ├── Models/             # データモデル
+│       ├── Data/               # Entity Framework コンテキスト
+│       ├── wwwroot/            # 静的ファイル
+│       └── appsettings.json    # 設定ファイル
+└── docs/                       # ドキュメント
 ```
 
-## Integrate with your tools
+## データベースモデル
 
-- [ ] [Set up project integrations](https://gitlab.com/union.dml-group/event-attendees-app/-/settings/integrations)
+### EventAttendee エンティティ
+- EventName: イベント名
+- AttendeeName: 参加者名
+- Email: メールアドレス
+- RegistrationDate: 登録日
 
-## Collaborate with your team
+## デプロイメント
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+### Azure App Service
+1. Azure CLI でログイン
+2. リソースグループとApp Serviceを作成
+3. デプロイ実行
 
-## Test and Deploy
+### Docker コンテナ
+```bash
+docker build -t event-attendees-app .
+docker push [your-registry]/event-attendees-app
+```
 
-Use the built-in continuous integration in GitLab.
+## 環境変数
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+- `ConnectionStrings:DefaultConnection`: データベース接続文字列
+- Azure Key Vault設定 (本番環境)
 
-***
+## 貢献
 
-# Editing this README
+プルリクエストやイシューの報告を歓迎します。
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+1. フォークする
+2. フィーチャーブランチを作成 (`git checkout -b feature/AmazingFeature`)
+3. 変更をコミット (`git commit -m 'Add some AmazingFeature'`)
+4. ブランチにプッシュ (`git push origin feature/AmazingFeature`)
+5. プルリクエストを作成
 
-## Suggestions for a good README
+## ライセンス
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+このプロジェクトは MIT ライセンスの下で公開されています。
 
-## Name
-Choose a self-explaining name for your project.
+## 連絡先
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+質問や問題がある場合は、GitLabのイシューを作成してください。
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+## 開発者向け情報
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+- Entity Framework Core を使用したデータアクセス
+- Azure Key Vault による設定管理
+- Bootstrap を使用したレスポンシブデザイン
+- Docker対応でクロスプラットフォーム実行可能
