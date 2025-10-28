@@ -5,6 +5,8 @@ VisualStudioVersion = 17.10.35027.167
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EventAttendeesApp", "EventAttendeesApp\EventAttendeesApp.csproj", "{F95BB7D6-5DB4-40E9-937F-CAF6168CF1F9}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "EventAttendeesApp.Tests", "EventAttendeesApp.Tests\EventAttendeesApp.Tests.csproj", "{AAC7F452-4954-4917-B5BD-95C5DC4B06DD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
