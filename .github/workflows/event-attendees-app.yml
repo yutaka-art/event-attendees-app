@@ -76,9 +76,9 @@ jobs:
       name: dev
     timeout-minutes: 60
     services:
-      docker:26-dind:
+      docker-dind:
         image: docker:26-dind
-        options: docker:26-dind --tls=false
+        options: --privileged --tls=false
     env:
       BUILD_CONFIGURATION: Release
       DOCKER_HOST: tcp://docker:2375
