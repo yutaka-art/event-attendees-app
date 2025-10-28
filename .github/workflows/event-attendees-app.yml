@@ -42,7 +42,7 @@ jobs:
             --configuration "$BUILD_CONFIGURATION" \
             --collect:"XPlat Code Coverage" \
             --logger "trx;LogFileName=$(pwd)/test-results/${NAME}-test-results.trx"
-          # カバレッジXMLを収集してcoverage/にコピー
+          # Collect coverage XML and copy to coverage/
           echo "[gather coverage] $proj"
           RESULT_DIR=$(dirname "$proj")/TestResults
           FOUND_FILE=$(find "$RESULT_DIR" -type f -name "coverage.cobertura.xml" | head -n 1 || true)
