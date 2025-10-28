@@ -23,7 +23,7 @@ jobs:
         fetch-depth: 20
         lfs: true
     - run: echo "Discovering test projects..."
-    - run: TEST_PROJECTS_LIST=$(find . -type f -name '*.Tests.csproj')
+    - run: echo "TEST_PROJECTS_LIST=$(find . -type f -name '*.Tests.csproj')" >> $GITHUB_ENV
     - run: echo "Found test projects:"
     - run: echo "$TEST_PROJECTS_LIST"
     - run: mkdir -p coverage
