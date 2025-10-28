@@ -2,7 +2,10 @@ name: CI/CD (event-attendees-app)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'database/**'
   workflow_dispatch:
 
 concurrency:
@@ -11,13 +14,9 @@ concurrency:
 
 jobs:
   build_and_test:
-    # まずは .NET のビルド＆テスト＆カバレッジ収集
     runs-on: ubuntu-latest
-
-    # GitLab の job.container に相当する SDK イメージをここで使う
     container:
       image: mcr.microsoft.com/dotnet/sdk:8.0
-
     env:
       BUILD_CONFIGURATION: Release
 
@@ -25,31 +24,72 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0        # 履歴が必要なら0。浅い clone でよければ 20 でも可
-          lfs: false            # ← git-lfs ないので無効化
+          fetch-depth: 0
+          lfs: false
+
+      # ★ 追加: ビルド対象を自動検出（優先: *.sln → なければ *.csproj(Tests除く)）
+      - name: Locate solution or projects
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          sln=$(ls -1 *.sln 2>/dev/null || true)
+          if [ -z "$sln" ]; then
+            sln=$(ls -1 src/*.sln 2>/dev/null || true)
+          fi
+          if [ -n "$sln" ]; then
+            echo "mode=sln"     >> $GITHUB_OUTPUT
+            echo "target=$sln"  >> $GITHUB_OUTPUT
+            echo "Using solution: $sln"
+            exit 0
+          fi
+
+          mapfile -t projects < <(find . -type f -name '*.csproj' ! -name '*.Tests.csproj' | sort)
+          if [ ${#projects[@]} -eq 0 ]; then
+            echo "No buildable *.csproj found (excluding *Tests.csproj)." >&2
+            exit 1
+          fi
+          echo "mode=proj" >> $GITHUB_OUTPUT
+          echo "target=$(printf "%s " "${projects[@]}")" >> $GITHUB_OUTPUT
+          printf "Using projects:\n%s\n" "${projects[@]}"
 
       - name: Discover test projects
         id: discover
         shell: bash
         run: |
-          TEST_PROJECTS_LIST=$(find . -type f -name '*.Tests.csproj')
+          set -euo pipefail
+          TEST_PROJECTS_LIST=$(find . -type f -name '*.Tests.csproj' | sort || true)
           echo "Found test projects:"
           echo "$TEST_PROJECTS_LIST"
-          # 後続ステップに渡す
           echo "projects=$TEST_PROJECTS_LIST" >> $GITHUB_OUTPUT
 
-      - name: Restore and Build (solution-wide)
+      - name: Restore and Build
         shell: bash
         run: |
-          dotnet restore
-          dotnet build --no-restore --configuration "$BUILD_CONFIGURATION"
+          set -euo pipefail
+          if [ "${{ steps.locate.outputs.mode }}" = "sln" ]; then
+            dotnet restore "${{ steps.locate.outputs.target }}"
+            dotnet build   "${{ steps.locate.outputs.target }}" --no-restore --configuration "$BUILD_CONFIGURATION"
+          else
+            for p in ${{ steps.locate.outputs.target }}; do
+              dotnet restore "$p"
+              dotnet build   "$p" --no-restore --configuration "$BUILD_CONFIGURATION"
+            done
+          fi
 
       - name: Test with coverage
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p coverage test-results
+          if [ -z "${{ steps.discover.outputs.projects }}" ]; then
+            echo "No test projects found. Skipping tests."
+            exit 0
+          fi
 
-          for proj in ${{ steps.discover.outputs.projects }}; do
+          # 複数行の安全なループ
+          while IFS= read -r proj; do
+            [ -z "$proj" ] && continue
             echo "=== Testing $proj ==="
             NAME=$(basename "$proj" .csproj)
 
@@ -57,23 +97,15 @@ jobs:
               --no-build \
               --configuration "$BUILD_CONFIGURATION" \
               --collect:"XPlat Code Coverage" \
-              --logger "trx;LogFileName=${NAME}-test-results.trx"
+              --logger "trx;LogFileName=${NAME}-test-results.trx" || true
 
-            # 走った test の出力 (TRX / cobertura) を集約
-            RESULTS_DIR=$(dirname "$proj")/TestResults
-
-            # coverage.cobertura.xml をコピー
+            RESULTS_DIR="$(dirname "$proj")/TestResults"
             COV_FILE=$(find "$RESULTS_DIR" -type f -name "coverage.cobertura.xml" | head -n 1 || true)
-            if [ -n "$COV_FILE" ]; then
-              cp "$COV_FILE" "coverage/${NAME}-coverage.cobertura.xml"
-            fi
+            [ -n "$COV_FILE" ] && cp "$COV_FILE" "coverage/${NAME}-coverage.cobertura.xml" || echo "No coverage for $proj"
 
-            # TRX をコピー（あれば）
             TRX_FILE=$(find "$RESULTS_DIR" -type f -name "*.trx" | head -n 1 || true)
-            if [ -n "$TRX_FILE" ]; then
-              cp "$TRX_FILE" "test-results/${NAME}-test-results.trx"
-            fi
-          done
+            [ -n "$TRX_FILE" ] && cp "$TRX_FILE" "test-results/${NAME}-test-results.trx" || echo "No TRX for $proj"
+          done <<< "${{ steps.discover.outputs.projects }}"
 
       - name: Upload test artifacts (coverage & trx)
         if: always()
@@ -86,20 +118,14 @@ jobs:
             test-results/
 
   build_and_push_image:
-    # Dev環境デプロイ相当
     needs: build_and_test
     runs-on: ubuntu-latest
-
-    # 手動トリガー(workflow_dispatch)のときだけ動かしたい
     if: github.event_name == 'workflow_dispatch'
-
     env:
       BUILD_CONFIGURATION: Release
-      # ACR 接続情報
       ACR_LOGIN_SERVER: cravanfr.azurecr.io
       IMAGE_NAME: eventattendeesapp
       IMAGE_TAG: latest
-      # ← secrets はここで展開する（ワークフロー全体ではなく、このjobだけ）
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
       ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
 
@@ -118,8 +144,7 @@ jobs:
       - name: Login to Azure Container Registry
         shell: bash
         run: |
-          echo "${ACR_PASSWORD}" | docker login "${ACR_LOGIN_SERVER}" \
-            --username "${ACR_USERNAME}" --password-stdin
+          echo "${ACR_PASSWORD}" | docker login "${ACR_LOGIN_SERVER}" --username "${ACR_USERNAME}" --password-stdin
 
       - name: Build container image
         shell: bash
@@ -130,8 +155,4 @@ jobs:
 
       - name: Push container image
         shell: bash
-        run: |
-          docker push "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
-
-      # ここでkubectl/appservice/containerapp等にデプロイしたい場合は、後続stepでaz cliやkubectlを呼ぶ
-      # 例: az containerapp update ... などを追加する
+        run: docker push "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
