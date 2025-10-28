@@ -94,7 +94,7 @@ jobs:
     - uses: actions/download-artifact@v4.1.0
     - run: echo "=== Deploy to Dev (build & push container image) ==="
     - run: echo "Logging in to $ACR_LOGIN_SERVER ..."
-    - run: docker login "$ACR_LOGIN_SERVER" -u "$ACR_USERNAME" -p "$ACR_PASSWORD"
+    - run: echo "$ACR_PASSWORD" | docker login "$ACR_LOGIN_SERVER" -u "$ACR_USERNAME" --password-stdin
     - run: echo "Building image..."
     - run: docker build -t "$ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG" -f src/Dockerfile ./src
     - run: echo "Pushing image to $ACR_LOGIN_SERVER ..."
