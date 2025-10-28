@@ -1,0 +1,103 @@
+name: union.dml-group/event-attendees-app
+on:
+  push:
+  workflow_dispatch:
+concurrency:
+  group: "${{ github.ref }}"
+  cancel-in-progress: true
+env:
+  ACR_USERNAME: "${{ secrets.ACR_USERNAME }}"
+  ACR_PASSWORD: "${{ secrets.ACR_PASSWORD }}"
+jobs:
+  unit_test_job:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:8.0
+    if: # Unable to map conditional expression to GitHub Actions equivalent
+#         ${{ github.ref }} == "main" || false
+    timeout-minutes: 60
+    env:
+      BUILD_CONFIGURATION: Release
+    steps:
+    - uses: actions/checkout@v4.1.0
+      with:
+        fetch-depth: 20
+        lfs: true
+    - run: echo "Discovering test projects..."
+    - run: TEST_PROJECTS_LIST=$(find . -type f -name '*.Tests.csproj')
+    - run: echo "Found test projects:"
+    - run: echo "$TEST_PROJECTS_LIST"
+    - run: mkdir -p coverage
+    - run: mkdir -p test-results
+    - run: |
+        for proj in $TEST_PROJECTS_LIST; do
+          echo "=== Processing $proj ==="
+          NAME=$(basename "$proj" .csproj)
+          echo "[restore] $proj"
+          dotnet restore "$proj"
+          echo "[build] $proj"
+          dotnet build "$proj" --no-restore --configuration "$BUILD_CONFIGURATION"
+          echo "[test]  $proj (with coverlet.collector)"
+          dotnet test "$proj" \
+            --no-build \
+            --configuration "$BUILD_CONFIGURATION" \
+            --collect:"XPlat Code Coverage" \
+            --logger "trx;LogFileName=$(pwd)/test-results/${NAME}-test-results.trx"
+          # カバレッジXMLを収集してcoverage/にコピー
+          echo "[gather coverage] $proj"
+          RESULT_DIR=$(dirname "$proj")/TestResults
+          FOUND_FILE=$(find "$RESULT_DIR" -type f -name "coverage.cobertura.xml" | head -n 1 || true)
+          if [ -n "$FOUND_FILE" ]; then
+            cp "$FOUND_FILE" "coverage/${NAME}-coverage.cobertura.xml"
+          else
+            echo "No coverage.cobertura.xml found for $proj"
+          fi
+        done
+    - run: echo "==== coverage dir ===="
+    - run: ls -R coverage || true
+    - run: echo "==== test-results dir ===="
+    - run: ls -R test-results || true
+#     # 'artifacts.junit' was not transformed because there is no suitable equivalent in GitHub Actions
+#     # 'artifacts.coverage_report' was not transformed because there is no suitable equivalent in GitHub Actions
+    - uses: actions/upload-artifact@v4.1.0
+      if: always()
+      with:
+        name: "${{ github.job }}"
+        retention-days: 7
+        path: |-
+          coverage/
+          test-results/
+  deploy_dev_job:
+    needs: unit_test_job
+    runs-on: ubuntu-latest
+    container:
+      image: docker:26
+    if: github.event_name == 'workflow_dispatch'
+    environment:
+      name: dev
+    timeout-minutes: 60
+    services:
+      docker:26-dind:
+        image: docker:26-dind
+        options: docker:26-dind --tls=false
+    env:
+      BUILD_CONFIGURATION: Release
+      DOCKER_HOST: tcp://docker:2375
+      DOCKER_TLS_CERTDIR: ''
+      ACR_LOGIN_SERVER: cravanfr.azurecr.io
+      IMAGE_NAME: eventattendeesapp
+      IMAGE_TAG: latest
+    steps:
+    - uses: actions/checkout@v4.1.0
+      with:
+        fetch-depth: 20
+        lfs: true
+    - uses: actions/download-artifact@v4.1.0
+    - run: echo "=== Deploy to Dev (build & push container image) ==="
+    - run: echo "Logging in to $ACR_LOGIN_SERVER ..."
+    - run: docker login "$ACR_LOGIN_SERVER" -u "$ACR_USERNAME" -p "$ACR_PASSWORD"
+    - run: echo "Building image..."
+    - run: docker build -t "$ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG" -f src/Dockerfile ./src
+    - run: echo "Pushing image to $ACR_LOGIN_SERVER ..."
+    - run: docker push "$ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG"
+    - run: echo "Done. Image pushed as $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG"
