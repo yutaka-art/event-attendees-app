@@ -1,102 +1,137 @@
-name: union.dml-group/event-attendees-app
+name: CI/CD (event-attendees-app)
+
 on:
   push:
+    branches: [ "main" ]
   workflow_dispatch:
+
 concurrency:
-  group: "${{ github.ref }}"
+  group: ${{ github.ref }}
   cancel-in-progress: true
-env:
-  ACR_USERNAME: "${{ secrets.ACR_USERNAME }}"
-  ACR_PASSWORD: "${{ secrets.ACR_PASSWORD }}"
+
 jobs:
-  unit_test_job:
+  build_and_test:
+    # まずは .NET のビルド＆テスト＆カバレッジ収集
     runs-on: ubuntu-latest
+
+    # GitLab の job.container に相当する SDK イメージをここで使う
     container:
       image: mcr.microsoft.com/dotnet/sdk:8.0
-    if: github.ref == 'refs/heads/main'
-    timeout-minutes: 60
+
     env:
       BUILD_CONFIGURATION: Release
+
     steps:
-    - uses: actions/checkout@v4.1.0
-      with:
-        fetch-depth: 20
-        lfs: true
-    - run: echo "Discovering test projects..."
-    - run: echo "TEST_PROJECTS_LIST=$(find . -type f -name '*.Tests.csproj')" >> $GITHUB_ENV
-    - run: echo "Found test projects:"
-    - run: echo "$TEST_PROJECTS_LIST"
-    - run: mkdir -p coverage
-    - run: mkdir -p test-results
-    - run: |
-        for proj in $TEST_PROJECTS_LIST; do
-          echo "=== Processing $proj ==="
-          NAME=$(basename "$proj" .csproj)
-          echo "[restore] $proj"
-          dotnet restore "$proj"
-          echo "[build] $proj"
-          dotnet build "$proj" --no-restore --configuration "$BUILD_CONFIGURATION"
-          echo "[test]  $proj (with coverlet.collector)"
-          dotnet test "$proj" \
-            --no-build \
-            --configuration "$BUILD_CONFIGURATION" \
-            --collect:"XPlat Code Coverage" \
-            --logger "trx;LogFileName=$(pwd)/test-results/${NAME}-test-results.trx"
-          # Collect coverage XML and copy to coverage/
-          echo "[gather coverage] $proj"
-          RESULT_DIR=$(dirname "$proj")/TestResults
-          FOUND_FILE=$(find "$RESULT_DIR" -type f -name "coverage.cobertura.xml" | head -n 1 || true)
-          if [ -n "$FOUND_FILE" ]; then
-            cp "$FOUND_FILE" "coverage/${NAME}-coverage.cobertura.xml"
-          else
-            echo "No coverage.cobertura.xml found for $proj"
-          fi
-        done
-    - run: echo "==== coverage dir ===="
-    - run: ls -R coverage || true
-    - run: echo "==== test-results dir ===="
-    - run: ls -R test-results || true
-#     # 'artifacts.junit' was not transformed because there is no suitable equivalent in GitHub Actions
-#     # 'artifacts.coverage_report' was not transformed because there is no suitable equivalent in GitHub Actions
-    - uses: actions/upload-artifact@v4.1.0
-      if: always()
-      with:
-        name: "${{ github.job }}"
-        retention-days: 7
-        path: |-
-          coverage/
-          test-results/
-  deploy_dev_job:
-    needs: unit_test_job
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # 履歴が必要なら0。浅い clone でよければ 20 でも可
+          lfs: false            # ← git-lfs ないので無効化
+
+      - name: Discover test projects
+        id: discover
+        shell: bash
+        run: |
+          TEST_PROJECTS_LIST=$(find . -type f -name '*.Tests.csproj')
+          echo "Found test projects:"
+          echo "$TEST_PROJECTS_LIST"
+          # 後続ステップに渡す
+          echo "projects=$TEST_PROJECTS_LIST" >> $GITHUB_OUTPUT
+
+      - name: Restore and Build (solution-wide)
+        shell: bash
+        run: |
+          dotnet restore
+          dotnet build --no-restore --configuration "$BUILD_CONFIGURATION"
+
+      - name: Test with coverage
+        shell: bash
+        run: |
+          mkdir -p coverage test-results
+
+          for proj in ${{ steps.discover.outputs.projects }}; do
+            echo "=== Testing $proj ==="
+            NAME=$(basename "$proj" .csproj)
+
+            dotnet test "$proj" \
+              --no-build \
+              --configuration "$BUILD_CONFIGURATION" \
+              --collect:"XPlat Code Coverage" \
+              --logger "trx;LogFileName=${NAME}-test-results.trx"
+
+            # 走った test の出力 (TRX / cobertura) を集約
+            RESULTS_DIR=$(dirname "$proj")/TestResults
+
+            # coverage.cobertura.xml をコピー
+            COV_FILE=$(find "$RESULTS_DIR" -type f -name "coverage.cobertura.xml" | head -n 1 || true)
+            if [ -n "$COV_FILE" ]; then
+              cp "$COV_FILE" "coverage/${NAME}-coverage.cobertura.xml"
+            fi
+
+            # TRX をコピー（あれば）
+            TRX_FILE=$(find "$RESULTS_DIR" -type f -name "*.trx" | head -n 1 || true)
+            if [ -n "$TRX_FILE" ]; then
+              cp "$TRX_FILE" "test-results/${NAME}-test-results.trx"
+            fi
+          done
+
+      - name: Upload test artifacts (coverage & trx)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts
+          retention-days: 7
+          path: |
+            coverage/
+            test-results/
+
+  build_and_push_image:
+    # Dev環境デプロイ相当
+    needs: build_and_test
     runs-on: ubuntu-latest
-    container:
-      image: docker:26
+
+    # 手動トリガー(workflow_dispatch)のときだけ動かしたい
     if: github.event_name == 'workflow_dispatch'
-    environment:
-      name: dev
-    timeout-minutes: 60
-    services:
-      docker-dind:
-        image: docker:26-dind
-        options: --privileged --tls=false
+
     env:
       BUILD_CONFIGURATION: Release
-      DOCKER_HOST: tcp://docker:2375
-      DOCKER_TLS_CERTDIR: ''
+      # ACR 接続情報
       ACR_LOGIN_SERVER: cravanfr.azurecr.io
       IMAGE_NAME: eventattendeesapp
       IMAGE_TAG: latest
+      # ← secrets はここで展開する（ワークフロー全体ではなく、このjobだけ）
+      ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+      ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+
     steps:
-    - uses: actions/checkout@v4.1.0
-      with:
-        fetch-depth: 20
-        lfs: true
-    - uses: actions/download-artifact@v4.1.0
-    - run: echo "=== Deploy to Dev (build & push container image) ==="
-    - run: echo "Logging in to $ACR_LOGIN_SERVER ..."
-    - run: echo "$ACR_PASSWORD" | docker login "$ACR_LOGIN_SERVER" -u "$ACR_USERNAME" --password-stdin
-    - run: echo "Building image..."
-    - run: docker build -t "$ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG" -f src/Dockerfile ./src
-    - run: echo "Pushing image to $ACR_LOGIN_SERVER ..."
-    - run: docker push "$ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG"
-    - run: echo "Done. Image pushed as $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG"
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: false
+
+      - name: Download test artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: test-artifacts
+
+      - name: Login to Azure Container Registry
+        shell: bash
+        run: |
+          echo "${ACR_PASSWORD}" | docker login "${ACR_LOGIN_SERVER}" \
+            --username "${ACR_USERNAME}" --password-stdin
+
+      - name: Build container image
+        shell: bash
+        run: |
+          docker build \
+            -t "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}" \
+            -f src/Dockerfile ./src
+
+      - name: Push container image
+        shell: bash
+        run: |
+          docker push "${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+      # ここでkubectl/appservice/containerapp等にデプロイしたい場合は、後続stepでaz cliやkubectlを呼ぶ
+      # 例: az containerapp update ... などを追加する
