@@ -1,0 +1,126 @@
+# パイプラインを起動する条件:
+# - main ブランチ
+# - かつ src/** または database/** に変更がある場合のみ
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - src/**/*
+        - database/**/*
+    - when: never
+
+variables:
+  BUILD_CONFIGURATION: "Release"
+
+stages:
+  - test
+  - deploy_dev
+
+# ---------------------------------
+# Unit Test + Coverage
+# ---------------------------------
+unit_test_job:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    # 1. テストプロジェクトを再帰的に検索 (*.Tests.csproj)
+    - echo "Discovering test projects..."
+    - TEST_PROJECTS_LIST=$(find . -type f -name '*.Tests.csproj')
+    - echo "Found test projects:"
+    - echo "$TEST_PROJECTS_LIST"
+
+    # 2. 出力ディレクトリ準備
+    - mkdir -p coverage
+    - mkdir -p test-results
+
+    # 3. 各テストプロジェクトごとに restore/build/test
+    - |
+      for proj in $TEST_PROJECTS_LIST; do
+        echo "=== Processing $proj ==="
+        NAME=$(basename "$proj" .csproj)
+
+        echo "[restore] $proj"
+        dotnet restore "$proj"
+
+        echo "[build] $proj"
+        dotnet build "$proj" --no-restore --configuration "$BUILD_CONFIGURATION"
+
+        echo "[test]  $proj (with coverlet.collector)"
+        dotnet test "$proj" \
+          --no-build \
+          --configuration "$BUILD_CONFIGURATION" \
+          --collect:"XPlat Code Coverage" \
+          --logger "trx;LogFileName=$(pwd)/test-results/${NAME}-test-results.trx"
+
+        # カバレッジXMLを収集してcoverage/にコピー
+        echo "[gather coverage] $proj"
+        RESULT_DIR=$(dirname "$proj")/TestResults
+        FOUND_FILE=$(find "$RESULT_DIR" -type f -name "coverage.cobertura.xml" | head -n 1 || true)
+        if [ -n "$FOUND_FILE" ]; then
+          cp "$FOUND_FILE" "coverage/${NAME}-coverage.cobertura.xml"
+        else
+          echo "No coverage.cobertura.xml found for $proj"
+        fi
+      done
+
+    # 4. 確認ログ
+    - echo "==== coverage dir ===="
+    - ls -R coverage || true
+    - echo "==== test-results dir ===="
+    - ls -R test-results || true
+
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - coverage/
+      - test-results/
+    reports:
+      junit: test-results/*.trx
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/*.xml
+
+# ---------------------------------
+# 2. Deploy to Dev (Docker build & push to ACR)
+# ---------------------------------
+deploy_dev_job:
+  stage: deploy_dev
+  needs: ["unit_test_job"]
+
+  image: docker:26
+
+  services:
+    - name: docker:26-dind
+      command: ["--tls=false"]
+
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    ACR_LOGIN_SERVER: "cravanfr.azurecr.io"
+    IMAGE_NAME: "eventattendeesapp"
+    IMAGE_TAG: "latest"
+
+  when: manual
+
+  script:
+    - echo "=== Deploy to Dev (build & push container image) ==="
+
+    # 1. ACRログイン
+    #    ※ ACR_USERNAME / ACR_PASSWORD は GitLab の CI/CD Variables で登録済みを前提
+    - echo "Logging in to $ACR_LOGIN_SERVER ..."
+    - docker login "$ACR_LOGIN_SERVER" -u "$ACR_USERNAME" -p "$ACR_PASSWORD"
+
+    # 2. コンテナイメージをビルド
+    #    ★ コンテキストを ./src に変更！
+    - echo "Building image..."
+    - docker build -t "$ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG" -f src/Dockerfile ./src
+
+    # 3. push
+    - echo "Pushing image to $ACR_LOGIN_SERVER ..."
+    - docker push "$ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG"
+
+    - echo "Done. Image pushed as $ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG"
+
+  environment:
+    name: dev
